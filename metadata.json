@@ -1,0 +1,6 @@
+{
+  "name": "PlayVault: Unblocked Games",
+  "description": "Fast and responsive unblocked games portal featuring HTML5 classics, iframe game player, JSON catalog, and tab cloaking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

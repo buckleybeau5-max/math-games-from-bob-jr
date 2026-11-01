@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Retro Pong Masters</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #020617;
+      color: #f8fafc;
+      font-family: 'Space Mono', 'Courier New', Courier, monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 12px;
+    }
+    .hud {
+      width: 100%;
+      max-width: 540px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .score-board {
+      display: flex;
+      gap: 32px;
+      font-size: 28px;
+      font-weight: 800;
+      color: #38bdf8;
+    }
+    .controls-top {
+      display: flex;
+      gap: 8px;
+    }
+    .toggle-btn {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .toggle-btn.active {
+      background: #0284c7;
+      color: #fff;
+      border-color: #38bdf8;
+    }
+    .screen {
+      position: relative;
+      width: 100%;
+      max-width: 540px;
+      aspect-ratio: 16/10;
+      border: 2px solid #334155;
+      border-radius: 8px;
+      background: #000;
+      box-shadow: 0 0 25px rgba(0,0,0,0.8);
+    }
+    canvas { width: 100%; height: 100%; display: block; }
+    .hint { margin-top: 10px; font-size: 12px; color: #64748b; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <div class="score-board">
+      <span id="p1-score">0</span>
+      <span style="color: #64748b;">:</span>
+      <span id="p2-score">0</span>
+    </div>
+    <div class="controls-top">
+      <button class="toggle-btn active" id="mode-1p">1P vs CPU</button>
+      <button class="toggle-btn" id="mode-2p">2P Local</button>
+      <button class="toggle-btn" id="diff-btn">CPU: Normal</button>
+    </div>
+  </div>
+
+  <div class="screen">
+    <canvas id="canvas" width="640" height="400"></canvas>
+  </div>
+
+  <div class="hint" id="controls-hint">P1: W/S or Arrow Keys · First to 7 wins</div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const p1ScoreEl = document.getElementById('p1-score');
+    const p2ScoreEl = document.getElementById('p2-score');
+    const mode1pBtn = document.getElementById('mode-1p');
+    const mode2pBtn = document.getElementById('mode-2p');
+    const diffBtn = document.getElementById('diff-btn');
+    const controlsHint = document.getElementById('controls-hint');
+
+    let mode = '1P'; // 1P or 2P
+    let diff = 'Normal'; // Easy, Normal, Hard
+    let diffMultipliers = { Easy: 0.05, Normal: 0.1, Hard: 0.16 };
+
+    let p1 = { x: 20, y: 160, w: 12, h: 80, speed: 7, score: 0 };
+    let p2 = { x: 608, y: 160, w: 12, h: 80, speed: 7, score: 0 };
+    let ball = { x: 320, y: 200, vx: 5, vy: 3, r: 6 };
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function beep(freq, dur = 0.06) {
+      try {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.type = 'square';
+        o.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        g.gain.setValueAtTime(0.08, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+        o.connect(g);
+        g.connect(audioCtx.destination);
+        o.start();
+        o.stop(audioCtx.currentTime + dur);
+      } catch (e) {}
+    }
+
+    function resetBall(direction = 1) {
+      ball.x = canvas.width / 2;
+      ball.y = canvas.height / 2;
+      ball.vx = (Math.random() > 0.5 ? 4.5 : -4.5) * direction;
+      ball.vy = (Math.random() * 4 - 2);
+    }
+
+    let keys = {};
+    window.addEventListener('keydown', e => { keys[e.code] = true; });
+    window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+    function update() {
+      // P1 input
+      if (keys['KeyW'] || (mode === '1P' && keys['ArrowUp'])) {
+        p1.y = Math.max(0, p1.y - p1.speed);
+      }
+      if (keys['KeyS'] || (mode === '1P' && keys['ArrowDown'])) {
+        p1.y = Math.min(canvas.height - p1.h, p1.y + p1.speed);
+      }
+
+      // P2 input or CPU
+      if (mode === '2P') {
+        if (keys['ArrowUp']) p2.y = Math.max(0, p2.y - p2.speed);
+        if (keys['ArrowDown']) p2.y = Math.min(canvas.height - p2.h, p2.y + p2.speed);
+      } else {
+        // CPU logic
+        const targetY = ball.y - p2.h / 2;
+        p2.y += (targetY - p2.y) * diffMultipliers[diff];
+        p2.y = Math.max(0, Math.min(canvas.height - p2.h, p2.y));
+      }
+
+      // Ball physics
+      ball.x += ball.vx;
+      ball.y += ball.vy;
+
+      // Top / bottom bounce
+      if (ball.y - ball.r <= 0) {
+        ball.y = ball.r;
+        ball.vy *= -1;
+        beep(320);
+      } else if (ball.y + ball.r >= canvas.height) {
+        ball.y = canvas.height - ball.r;
+        ball.vy *= -1;
+        beep(320);
+      }
+
+      // Left paddle collision (P1)
+      if (
+        ball.x - ball.r <= p1.x + p1.w &&
+        ball.x + ball.r >= p1.x &&
+        ball.y >= p1.y &&
+        ball.y <= p1.y + p1.h
+      ) {
+        ball.vx = Math.abs(ball.vx) * 1.05; // slight speedup
+        const offset = (ball.y - (p1.y + p1.h / 2)) / (p1.h / 2);
+        ball.vy = offset * 6;
+        beep(480);
+      }
+
+      // Right paddle collision (P2)
+      if (
+        ball.x + ball.r >= p2.x &&
+        ball.x - ball.r <= p2.x + p2.w &&
+        ball.y >= p2.y &&
+        ball.y <= p2.y + p2.h
+      ) {
+        ball.vx = -Math.abs(ball.vx) * 1.05;
+        const offset = (ball.y - (p2.y + p2.h / 2)) / (p2.h / 2);
+        ball.vy = offset * 6;
+        beep(480);
+      }
+
+      // Goals
+      if (ball.x < 0) {
+        p2.score++;
+        p2ScoreEl.textContent = p2.score;
+        beep(200, 0.2);
+        resetBall(1);
+      } else if (ball.x > canvas.width) {
+        p1.score++;
+        p1ScoreEl.textContent = p1.score;
+        beep(600, 0.15);
+        resetBall(-1);
+      }
+
+      draw();
+      requestAnimationFrame(update);
+    }
+
+    function draw() {
+      ctx.fillStyle = '#020617';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Center dashed net
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([12, 12]);
+      ctx.beginPath();
+      ctx.moveTo(canvas.width / 2, 0);
+      ctx.lineTo(canvas.width / 2, canvas.height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Paddles
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(p1.x, p1.y, p1.w, p1.h);
+      ctx.fillStyle = '#f43f5e';
+      ctx.fillRect(p2.x, p2.y, p2.w, p2.h);
+
+      // Ball
+      ctx.fillStyle = '#f8fafc';
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    mode1pBtn.addEventListener('click', () => {
+      mode = '1P';
+      mode1pBtn.classList.add('active');
+      mode2pBtn.classList.remove('active');
+      diffBtn.style.display = 'inline-block';
+      controlsHint.textContent = 'P1: W/S or Arrow Keys · First to 7 wins';
+    });
+
+    mode2pBtn.addEventListener('click', () => {
+      mode = '2P';
+      mode2pBtn.classList.add('active');
+      mode1pBtn.classList.remove('active');
+      diffBtn.style.display = 'none';
+      controlsHint.textContent = 'P1: W/S Keys · P2: Up/Down Arrow Keys';
+    });
+
+    diffBtn.addEventListener('click', () => {
+      if (diff === 'Easy') diff = 'Normal';
+      else if (diff === 'Normal') diff = 'Hard';
+      else diff = 'Easy';
+      diffBtn.textContent = `CPU: ${diff}`;
+    });
+
+    // Touch support for P1
+    canvas.addEventListener('touchmove', e => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const scaleY = canvas.height / rect.height;
+      const touchY = (e.touches[0].clientY - rect.top) * scaleY;
+      p1.y = Math.max(0, Math.min(canvas.height - p1.h, touchY - p1.h / 2));
+    }, { passive: false });
+
+    resetBall();
+    update();
+  </script>
+</body>
+</html>
